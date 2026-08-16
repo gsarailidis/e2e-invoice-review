@@ -66,3 +66,8 @@ def create_azure_openai_responses_model(
         provider=provider,
         settings=OpenAIResponsesModelSettings(openai_store=False),
     )
+
+
+async def close_azure_openai_responses_model(model: OpenAIResponsesModel) -> None:
+    """Close the provider-owned asynchronous client during application shutdown."""
+    await model.client.close()

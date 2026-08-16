@@ -11,6 +11,7 @@ SAMPLES_DIRECTORY = REPOSITORY_DIRECTORY / "samples" / "generated"
 
 sys.path.insert(0, str(BACKEND_DIRECTORY))
 
+from app.accounting import GENERAL_LEDGER_ACCOUNTS  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.pipeline import (  # noqa: E402
     DocumentClassificationStep,
@@ -18,6 +19,7 @@ from app.pipeline import (  # noqa: E402
     DocumentInput,
     DocumentMediaType,
     DocumentValidationStep,
+    GeneralLedgerClassificationStep,
     Pipeline,
     ProcessedDocument,
 )
@@ -44,6 +46,7 @@ MEDIA_TYPES: dict[str, DocumentMediaType] = {
     ".png": "image/png",
 }
 CASE_INSENSITIVE_FIELDS = {"customer_name", "vendor_name"}
+GENERAL_LEDGER_CODES = {account.code for account in GENERAL_LEDGER_ACCOUNTS}
 
 
 def _manifest_entries() -> dict[str, dict[str, object]]:
@@ -156,7 +159,14 @@ def _evaluate(
     issues_match = actual_issue_codes == expected_issue_codes
     item_count = len(result.document.items)
     items_match = expected_item_count is None or item_count == expected_item_count
-    matches = field_comparison["matches"] is True and issues_match and items_match
+    general_ledger = result.metadata.general_ledger
+    ledger_matches = general_ledger.account.code in GENERAL_LEDGER_CODES
+    matches = (
+        field_comparison["matches"] is True
+        and issues_match
+        and items_match
+        and ledger_matches
+    )
 
     return (
         {
@@ -172,6 +182,12 @@ def _evaluate(
                 "expected": expected_item_count,
                 "actual": item_count,
                 "matches": items_match,
+            },
+            "general_ledger": {
+                "account": general_ledger.account.model_dump(),
+                "rationale": general_ledger.rationale,
+                "source": general_ledger.source,
+                "matches_catalog": ledger_matches,
             },
             "matches": matches,
         },
@@ -195,6 +211,7 @@ def main() -> int:
             Pipeline.start(DocumentClassificationStep(model))
             .then(DocumentExtractionStep(document_intelligence))
             .then(DocumentValidationStep())
+            .then(GeneralLedgerClassificationStep(model))
         )
         evaluations = [
             _evaluate(pipeline, filename, entries[filename], item_count)

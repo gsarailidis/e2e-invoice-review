@@ -3,6 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.accounting import GeneralLedgerSuggestion
 from app.invoices.validation import ValidationResult
 from app.schemas.invoice import Invoice
 from app.schemas.receipt import Receipt
@@ -47,9 +48,19 @@ class ExtractedDocument:
     document: NormalizedDocument
 
 
-class ProcessedDocument(BaseModel):
+class ValidatedDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     classification: DocumentClassification
     document: Annotated[NormalizedDocument, Field(discriminator="document_type")]
     validation: ValidationResult
+
+
+class ProcessingMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    general_ledger: GeneralLedgerSuggestion
+
+
+class ProcessedDocument(ValidatedDocument):
+    metadata: ProcessingMetadata

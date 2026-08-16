@@ -1,3 +1,4 @@
+from .service import DocumentProcessingError, DocumentProcessingService
 from .validation import (
     ValidationIssue,
     ValidationResult,
@@ -6,6 +7,8 @@ from .validation import (
 )
 
 __all__ = [
+    "DocumentProcessingError",
+    "DocumentProcessingService",
     "ValidationIssue",
     "ValidationResult",
     "validate_invoice",

@@ -3,6 +3,10 @@ from typing import Self
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+MAX_UPLOAD_BYTES = 4 * 1024 * 1024
+FRONTEND_DEVELOPMENT_ORIGIN = "http://localhost:5173"
+DOCUMENT_MEDIA_TYPES = frozenset({"application/pdf", "image/png", "image/jpeg"})
+
 
 class Settings(BaseSettings):
     """Backend configuration loaded once at the application boundary."""

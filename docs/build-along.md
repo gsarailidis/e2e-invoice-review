@@ -207,19 +207,22 @@ returning an unchecked string.
 
 ### Outcome
 
-A reusable synchronous `Pipeline` chains classification, extraction, and deterministic validation:
+A reusable synchronous `Pipeline` chains classification, extraction, deterministic validation,
+and a structured general-ledger suggestion:
 
 ```python
 pipeline = (
     Pipeline.start(classification_step)
     .then(extraction_step)
     .then(validation_step)
+    .then(general_ledger_step)
 )
 ```
 
-Each step has a distinct typed input and output. The final `ProcessedDocument` contains the strict
-classification, a discriminated `Invoice | Receipt` Pydantic model, and structured validation
-issues. Document bytes pass through the chain without coupling providers to local file paths.
+Each step has a distinct typed input and output. Validation produces a `ValidatedDocument`; the
+final GL step produces a `ProcessedDocument` containing the strict classification, a discriminated
+`Invoice | Receipt` model, structured validation issues, and `metadata.general_ledger`. Document
+bytes pass through the earlier steps without coupling providers to local file paths.
 
 ### Why
 
@@ -228,6 +231,15 @@ partially initialized fields. Classification chooses `prebuilt-invoice` or `preb
 an `other` result stops before Document Intelligence is called. Extraction remains probabilistic,
 while offline VAT checks and total reconciliation remain pure deterministic functions that never
 rewrite extracted evidence or claim a live VIES registration result.
+
+The GL model receives normalized financial fields only. It selects a code through strict native
+structured output, then local accounting code resolves that selection against Northstar's fixed
+catalog. The suggestion is metadata for human review and never becomes approval policy.
+
+The fictional catalog contains ten accounts: Cleaning Services (6100), Repairs and Maintenance
+(6110), Electrical Services (6120), Plumbing Services (6130), HVAC Services (6140), Equipment
+Purchases (6200), Equipment Rental (6210), Fuel and Vehicle Expenses (6300), Facility Supplies
+(6400), and Professional Services (6500).
 
 `app/config.py` is the single backend environment boundary. Provider adapters receive explicit
 configuration, and Azure SDK response types remain inside those adapters.
@@ -242,17 +254,18 @@ uv run --project backend --locked --no-sync ruff check backend/app playground
 uv run --project backend --locked --no-sync python playground/pipeline.py
 ```
 
-The evaluator processes four one-page fictional documents. It makes eight live requests: four
-token-metered Azure OpenAI classifications and four Document Intelligence analyses. The four
-Document Intelligence pages fit within the F0 monthly allowance when quota remains; at the
-documented S0 USD retail rate they cost about $0.04 in total. Azure OpenAI cost depends on the
-configured deployment and the input/output tokens consumed by each document. The evaluator
+The evaluator processes four one-page fictional documents. It makes twelve live requests: four
+Azure OpenAI document classifications, four Document Intelligence analyses, and four Azure OpenAI
+GL suggestions. The four Document Intelligence pages fit within the F0 monthly allowance when
+quota remains; at the documented S0 USD retail rate they cost about $0.04 in total. Azure OpenAI
+cost depends on the configured deployment and the input/output tokens consumed. The evaluator
 persists neither document bytes nor provider output, so no cleanup command is required.
 
 ### What you should observe
 
 The evaluator prints each final Pydantic result, normalized-field comparisons, issue-code
-comparisons, and an overall `"matches": true`:
+comparisons, a catalog-backed GL suggestion for both invoices and receipts, and an overall
+`"matches": true`:
 
 - `01-en-happy-classic.pdf`: invoice, four line items, no focused issues.
 - `06-de-invalid-vendor-vat.pdf`: `vendor_vat_id_invalid`.
@@ -270,5 +283,152 @@ downstream human review.
 - [ ] The chain returns provider-independent, JSON-serializable Pydantic output.
 - [ ] Invoice and receipt classifications select their matching Document Intelligence models.
 - [ ] All four field and issue-code comparisons match the fictional manifest.
+- [ ] Every result contains a GL code from the fixed ten-account catalog under metadata.
 - [ ] `other` documents stop before extraction.
 - [ ] No raw provider output, secrets, documents, or runtime data are persisted.
+
+## FastAPI processing endpoint checkpoint
+
+### Outcome
+
+FastAPI exposes the complete synchronous financial-document pipeline to the future React client.
+`GET /health` reports readiness without calling Azure. `POST /api/documents/process` accepts one
+multipart `file` and returns the full `ProcessedDocument`, including typed extraction evidence,
+deterministic validation, and `metadata.general_ledger`.
+
+### Why
+
+HTTP parsing and status translation live in `invoices/routes.py`; pipeline orchestration lives in
+`invoices/service.py`; and `main.py` owns dependency wiring and provider lifetimes. This keeps file
+uploads, HTTP exceptions, and CORS outside finance rules and provider adapters. One pipeline is
+created during application startup and reused until both Azure clients are closed at shutdown.
+
+The upload boundary accepts PDF, PNG, and JPEG documents up to 4 MB. It returns `400` for an empty
+file, `413` above the limit, `415` for another media type, `422` when classification returns
+`other`, and a provider-independent `502` when cloud processing fails. Uploaded bytes and provider
+responses are never persisted. Development CORS is limited to `http://localhost:5173`.
+
+### Commands
+
+Start the backend from one terminal:
+
+```bash
+cd backend
+uv sync --locked
+uv run --locked --no-sync ruff check app ../playground
+uv run --locked --no-sync uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+From the repository root in another terminal, check health and process the two fictional document
+types:
+
+```bash
+curl --fail --silent http://127.0.0.1:8000/health | jq
+
+curl --fail --silent \
+  -F "file=@samples/generated/01-en-happy-classic.pdf;type=application/pdf" \
+  http://127.0.0.1:8000/api/documents/process | jq
+
+curl --fail --silent \
+  -F "file=@samples/generated/13-nl-fuel-receipt.png;type=image/png" \
+  http://127.0.0.1:8000/api/documents/process | jq
+```
+
+Health consumes no cloud capacity. The two processing requests make six provider calls: two Azure
+OpenAI classifications, two Document Intelligence analyses, and two Azure OpenAI GL suggestions.
+The two Document Intelligence pages fit within the F0 monthly allowance when quota remains; at
+the documented S0 USD retail rate they cost about $0.02 in total. Azure OpenAI cost depends on
+the configured deployment and token usage. Stop the local server with `Ctrl+C`; no document or
+response cleanup is required.
+
+### What you should observe
+
+- Health returns `{"status":"ok"}`.
+- The invoice response has `classification.document_type="invoice"`, four line items, valid
+  focused checks, and a catalog-backed GL suggestion.
+- The receipt response has `classification.document_type="receipt"`, one fuel line, EUR 50.00
+  subtotal, EUR 10.50 tax, EUR 60.50 total, and GL account `6300`.
+- OpenAPI documentation is available locally at `http://127.0.0.1:8000/docs`.
+- In a code-server workspace, the API root redirects to Swagger and the relative OpenAPI URL keeps
+  `/proxy/8000` in both schema loading and Swagger's **Try it out** requests.
+
+### Checkpoint
+
+- [ ] Locked installation and Ruff pass.
+- [ ] Health, CORS, empty-file, size-limit, media-type, `other`, and provider-failure boundaries
+  return their documented status codes.
+- [ ] Invoice and receipt uploads return JSON matching the existing pipeline models.
+- [ ] Provider errors expose no credentials, SDK payloads, or document contents.
+- [ ] No uploaded file, provider output, or runtime database is created.
+
+## Welcome upload and processing checkpoint
+
+### Outcome
+
+The React application now opens with a focused welcome screen for one PDF, PNG, or JPEG document.
+The user selects and confirms a file before starting the existing classification → extraction →
+validation → GL pipeline. Processing finishes on a compact, read-only result showing the document
+identity, reference, date, total, line-item count, deterministic validation status, and suggested
+general-ledger account.
+
+### Why
+
+The browser uses native `File`, `FormData`, and `fetch` APIs behind a typed client. It repeats the
+API's 4 MB and media-type checks for immediate feedback, while FastAPI remains authoritative. A
+relative `/backend` development proxy keeps the browser request same-origin on localhost and under
+the code-server `/proxy/...` URL. Vite derives the forwarded hostname from `VSCODE_PROXY_URI` and
+adds only that hostname to its development allowlist. It also uses the forwarded path as the
+development module base and restores that base after code-server strips it from incoming requests,
+so React and Vite client modules retain the `/proxy/5173` prefix. The backend CORS policy therefore
+stays narrow without disabling Vite's host-header protection.
+
+The file remains selected after a provider failure so Maya can retry, while a successful result can
+be cleared with **Process another document**. Uploaded bytes and responses remain in memory only;
+this slice adds no persistence, decisions, correction drafting, or review history.
+
+### Commands
+
+Prepare the frontend environment once:
+
+```bash
+cd frontend
+cp .env.example .env.local
+pnpm install --frozen-lockfile
+pnpm exec tsc -b --pretty false
+pnpm lint
+pnpm build
+```
+
+Run the API and UI in separate terminals:
+
+```bash
+cd backend
+uv run --locked --no-sync uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+```bash
+cd frontend
+pnpm dev --host 127.0.0.1
+```
+
+Open `http://127.0.0.1:5173`, select
+`samples/generated/01-en-happy-classic.pdf`, and click **Start processing**. One browser upload
+makes three provider requests: Azure OpenAI classification, one Document Intelligence page, and
+Azure OpenAI GL suggestion. No provider request is made until the button is clicked.
+
+### What you should observe
+
+- Unsupported, empty, and over-4-MB files are rejected before upload.
+- The selected file can be changed or removed, and the processing button prevents duplicate calls.
+- Invoice `EN-2026-1001` returns four line items, EUR totals, focused checks passed, and a
+  catalog-backed GL suggestion.
+- Provider and network failures show safe retryable messages without losing the selected file.
+- **Process another document** returns to the welcome upload state.
+
+### Checkpoint
+
+- [ ] The frozen install, strict TypeScript, ESLint, production build, and backend Ruff checks pass.
+- [ ] The frontend reaches FastAPI through the relative development proxy on localhost and in the
+  forwarded code-server workspace.
+- [ ] One invoice completes the entire pipeline and renders the compact result.
+- [ ] No uploaded file, API response, secret, or database is persisted.

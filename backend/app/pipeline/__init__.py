@@ -1,6 +1,7 @@
 from .classification import DocumentClassificationStep
 from .core import Pipeline, PipelineStep
 from .extraction import DocumentExtractionStep, UnsupportedDocumentTypeError
+from .general_ledger import GeneralLedgerClassificationStep
 from .models import (
     ClassifiedDocument,
     DocumentClassification,
@@ -9,6 +10,8 @@ from .models import (
     DocumentType,
     ExtractedDocument,
     ProcessedDocument,
+    ProcessingMetadata,
+    ValidatedDocument,
 )
 from .validation import DocumentValidationStep
 
@@ -17,6 +20,7 @@ __all__ = [
     "DocumentClassification",
     "DocumentClassificationStep",
     "DocumentExtractionStep",
+    "GeneralLedgerClassificationStep",
     "DocumentInput",
     "DocumentMediaType",
     "DocumentType",
@@ -24,6 +28,8 @@ __all__ = [
     "ExtractedDocument",
     "Pipeline",
     "PipelineStep",
+    "ProcessingMetadata",
     "ProcessedDocument",
     "UnsupportedDocumentTypeError",
+    "ValidatedDocument",
 ]
