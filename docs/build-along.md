@@ -49,3 +49,46 @@ cp frontend/.env.example frontend/.env
 - [ ] The health endpoint and starter screen load locally.
 
 Continue with the [online tutorial](https://learn.datalumina.com/docs/invoice-review).
+
+## Document Intelligence invoice checkpoint
+
+### Outcome
+
+`DocumentIntelligenceService` owns the configured Azure client and submits local invoices with
+the `prebuilt-invoice` model. The separate playground example selects the fictional English
+sample, calls the service, and prints the complete result model as formatted JSON.
+
+### Why
+
+This is the smallest useful provider check: it proves that the local endpoint and key work,
+that Azure accepts a local PDF, and that the extracted invoice fields are visible before the
+application introduces normalization or business rules.
+
+### Commands
+
+Add local `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` and `AZURE_DOCUMENT_INTELLIGENCE_KEY` values
+to `backend/.env`, then run the example from the playground directory:
+
+```bash
+cd playground
+uv run --project ../backend --locked --no-sync ruff check \
+  ../backend/app/services/document_intelligence_service.py document_intelligence.py
+uv run --project ../backend --locked --no-sync python document_intelligence.py
+```
+
+The second command makes one Azure Document Intelligence analysis request and may consume paid
+or limited provider capacity. It analyzes only
+`samples/generated/01-en-happy-classic.pdf`, writes no output file, and needs no cleanup.
+
+### What you should observe
+
+The command prints JSON whose top-level values include `apiVersion`, `modelId`, extracted
+`content`, `pages`, and a `documents` collection. For the selected sample, the first document
+contains invoice `EN-2026-1001`, four line items, EUR 100.00 subtotal, EUR 21.00 tax, and
+EUR 121.00 total together with Azure confidence values.
+
+### Checkpoint
+
+- [ ] Backend lint passes.
+- [ ] The provider request completes with the configured local Azure resource.
+- [ ] The printed result uses the `prebuilt-invoice` model and contains one extracted invoice.
